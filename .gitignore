@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual envs
+.venv/
+venv/
+ENV/
+
+env/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+
+# Lint
+.ruff_cache/
+
+# DB
+*.db
+*.sqlite3
+
+# Alembic
+alembic.log
+
+# Environment
+.env
+.env.*
+
+# Docker
+*.sock
+
+# macOS/Windows
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+

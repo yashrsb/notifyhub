@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+import uuid
+from enum import StrEnum
+
+from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.base import Base, TimestampMixin
+
+
+class NotificationStatus(StrEnum):
+    pending = "pending"
+    sent = "sent"
+    failed = "failed"
+
+
+class Notification(Base, TimestampMixin):
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    channel: Mapped[str] = mapped_column(String(length=64), nullable=False)
+    recipient: Mapped[str] = mapped_column(Text(), nullable=False)
+
+    template_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("notification_templates.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+    rendered_subject: Mapped[str] = mapped_column(Text(), nullable=False)
+    rendered_body: Mapped[str] = mapped_column(Text(), nullable=False)
+
+    status: Mapped[NotificationStatus] = mapped_column(
+        String(length=32),
+        nullable=False,
+        default=NotificationStatus.pending,
+        server_default="pending",
+    )
+
