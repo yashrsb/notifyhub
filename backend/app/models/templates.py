@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import String, Text
+from sqlalchemy import String, Text, ForeignKey
 
 from app.db.base import Base, TimestampMixin
 
