@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+import logging
+import uuid
+
+from celery import Task
+
+from app.workers.celery_app import celery_app
+from app.services.notification_worker_service import process_notification
+
+
+logger = logging.getLogger(__name__)
+
+
+@celery_app.task(bind=True, name="notifications.process", max_retries=3)
+def process_notification_task(self: Task, notification_id: str, attempt: int = 1) -> None:
+    """Celery task entrypoint. Business logic stays in services."""
+    nid = uuid.UUID(notification_id)
+    logger.info(
+        "Notification Processing Started",
+        extra={"notification_id": str(nid), "attempt": attempt},
+    )
+
+    try:
+        # Attempt lifecycle + attempt persistence handled in service.
+        process_notification(notification_id=nid, attempt_number=attempt)
+        logger.info("Notification Sent", extra={"notification_id": str(nid), "attempt": attempt})
+        return
+    except Exception as e:
+        logger.info(
+            "Retry Attempt",
+            extra={"notification_id": str(nid), "attempt": attempt, "error": str(e)},
+        )
+
+        if attempt >= 3:
+            # Dead-letter handling (DB final state)
+            from app.db.session import get_engine
+            from app.models.notification_attempts import NotificationAttemptStatus
+            from app.repositories.notification_attempts_repo import NotificationAttemptsRepository
+            from app.repositories.notifications_repo import NotificationsRepository
+
+            engine = get_engine()
+            import asyncio
+            from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+            async def runner() -> None:
+                sessionmaker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+                async with sessionmaker() as session:
+                    repo = NotificationAttemptsRepository(session)
+                    await repo.update_attempt_status(
+                        notification_id=nid,
+                        attempt_number=attempt,
+                        status=NotificationAttemptStatus.FAILED.value,
+                        error_message=str(e),
+                    )
+
+                    notif_repo = NotificationsRepository(session)
+                    await notif_repo.set_status(nid, "FAILED")
+
+            asyncio.run(runner())
+
+            logger.info(
+                "Notification Failed",
+                extra={"notification_id": str(nid), "attempt": attempt, "error": str(e)},
+            )
+            raise
+
+        countdown = 0 if attempt == 1 else (30 if attempt == 2 else 60)
+        raise self.retry(exc=e, countdown=countdown)
+
+
+

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from __future__ import annotations
+
+import uuid
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -10,7 +14,15 @@ class NotificationsRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def create(self, *, channel: str, recipient: str, template_id, rendered_subject: str, rendered_body: str) -> Notification:
+    async def create(
+        self,
+        *,
+        channel: str,
+        recipient: str,
+        template_id,
+        rendered_subject: str,
+        rendered_body: str,
+    ) -> Notification:
         notif = Notification(
             channel=channel,
             recipient=recipient,
@@ -29,4 +41,18 @@ class NotificationsRepository:
 
     async def get(self, notification_id):
         return await self.session.get(Notification, notification_id)
+
+    async def set_status(self, notification_id: uuid.UUID, status: str) -> None:
+        notif = await self.session.get(Notification, notification_id)
+        if notif is None:
+            return
+        notif.status = status
+        await self.session.commit()
+
+    async def set_last_error(self, notification_id: uuid.UUID, error_message: str) -> None:
+        # No error_message column on notifications in current schema.
+        # Final error is stored on notification_attempts.
+        return
+
+
 

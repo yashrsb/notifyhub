@@ -8,9 +8,10 @@ from pydantic import BaseModel, Field
 
 
 class NotificationStatus(str, Enum):
-    pending = "pending"
-    sent = "sent"
-    failed = "failed"
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    SENT = "SENT"
+    FAILED = "FAILED"
 
 
 class NotificationCreateRequest(BaseModel):
@@ -20,6 +21,12 @@ class NotificationCreateRequest(BaseModel):
     variables: dict[str, Any] = {}
 
 
+class NotificationAttemptResponse(BaseModel):
+    attempt: int
+    status: str
+    error: str | None = None
+
+
 class NotificationResponse(BaseModel):
     id: uuid.UUID
     channel: str
@@ -27,7 +34,14 @@ class NotificationResponse(BaseModel):
     template_id: uuid.UUID
     rendered_subject: str
     rendered_body: str
+
     status: NotificationStatus
     created_at: str
+    attempts: list[NotificationAttemptResponse] = []
 
+
+class NotificationQueuedResponse(BaseModel):
+    success: bool = True
+    message: str = "Notification queued"
+    notification_id: uuid.UUID
 

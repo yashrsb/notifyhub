@@ -1,19 +1,31 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.dependencies.auth import get_current_user
-from app.schemas.notifications import NotificationCreateRequest, NotificationResponse
-from app.services.notification_service import create_notification, get_notification, list_notifications
+from app.schemas.notifications import (
+    NotificationCreateRequest,
+    NotificationAttemptResponse,
+    NotificationQueuedResponse,
+    NotificationResponse,
+)
+
+from app.services.notification_service import create_notification
+from app.services.notification_worker_service import get_notification_with_attempts
+from app.tasks.notifications_tasks import process_notification_task
+
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
 
-@router.post("")
+
+@router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def create(
     req: NotificationCreateRequest,
     session: AsyncSession = Depends(get_db),
@@ -26,21 +38,16 @@ async def create(
         template_id=req.template_id,
         variables=req.variables,
     )
-    return {"success": True, "data": NotificationResponse(
-        id=notif.id,
-        channel=notif.channel,
-        recipient=notif.recipient,
-        template_id=notif.template_id,
-        rendered_subject=notif.rendered_subject,
-        rendered_body=notif.rendered_body,
-        status=notif.status,
-        created_at=str(notif.created_at),
-    ).model_dump()}
+
+    logger.info("Notification Queued", extra={"notification_id": str(notif.id)})
+    process_notification_task.delay(str(notif.id))
+
+    return NotificationQueuedResponse(notification_id=notif.id).model_dump()
 
 
 @router.get("")
 async def list_(session: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
-    notifs = await list_notifications(session=session)
+    notifs = await get_notification_with_attempts(session=session)
     data = [
         NotificationResponse(
             id=n.id,
@@ -51,6 +58,10 @@ async def list_(session: AsyncSession = Depends(get_db), current_user=Depends(ge
             rendered_body=n.rendered_body,
             status=n.status,
             created_at=str(n.created_at),
+            attempts=[
+                NotificationAttemptResponse(attempt=a["attempt"], status=a["status"], error=a.get("error"))
+                for a in (n.attempts or [])
+            ],
         ).model_dump()
         for n in notifs
     ]
@@ -58,16 +69,29 @@ async def list_(session: AsyncSession = Depends(get_db), current_user=Depends(ge
 
 
 @router.get("/{notification_id}")
-async def get(notification_id: uuid.UUID, session: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
-    notif = await get_notification(session=session, notification_id=notification_id)
-    return {"success": True, "data": NotificationResponse(
-        id=notif.id,
-        channel=notif.channel,
-        recipient=notif.recipient,
-        template_id=notif.template_id,
-        rendered_subject=notif.rendered_subject,
-        rendered_body=notif.rendered_body,
-        status=notif.status,
-        created_at=str(notif.created_at),
-    ).model_dump()}
+async def get(
+    notification_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    notif = await get_notification_with_attempts(session=session, notification_id=notification_id)
+
+    return {
+        "success": True,
+        "data": NotificationResponse(
+            id=notif.id,
+            channel=notif.channel,
+            recipient=notif.recipient,
+            template_id=notif.template_id,
+            rendered_subject=notif.rendered_subject,
+            rendered_body=notif.rendered_body,
+            status=notif.status,
+            created_at=str(notif.created_at),
+            attempts=[
+                NotificationAttemptResponse(attempt=a["attempt"], status=a["status"], error=a.get("error"))
+                for a in (notif.attempts or [])
+            ],
+        ).model_dump(),
+    }
+
 

@@ -11,9 +11,10 @@ from app.db.base import Base, TimestampMixin
 
 
 class NotificationStatus(StrEnum):
-    pending = "pending"
-    sent = "sent"
-    failed = "failed"
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    SENT = "SENT"
+    FAILED = "FAILED"
 
 
 class Notification(Base, TimestampMixin):
@@ -35,7 +36,7 @@ class Notification(Base, TimestampMixin):
     status: Mapped[NotificationStatus] = mapped_column(
         String(length=32),
         nullable=False,
-        default=NotificationStatus.pending,
-        server_default="pending",
+        default=NotificationStatus.PENDING,
+        server_default="PENDING",
     )
 

@@ -1,60 +1,68 @@
-# notifyhub (Phase 1)
+# notifyhub (Phase 2)
 
-Multi-Channel Notification Platform foundation (FastAPI + Async SQLAlchemy + JWT).
+## Architecture
 
-## Requirements
-- Docker + Docker Compose
+Client
+↓
+FastAPI
+↓
+PostgreSQL
+↓
+Redis Queue
+↓
+Celery Worker
+↓
+Notification Processor (EmailProvider)
 
-## Setup
-### 1) Start services
+## Endpoints
+
+- `POST /api/v1/notifications`
+  - Creates notification record
+  - Enqueues Celery job
+  - Returns **HTTP 202**:
+
+```json
+{
+  "success": true,
+  "message": "Notification queued",
+  "notification_id": "<uuid>"
+}
+```
+
+- `GET /api/v1/notifications/{id}`
+  - Returns status and persisted attempts
+
+## Retry schedule
+- Attempt #1: immediately
+- Attempt #2: after 30 seconds
+- Attempt #3: after 60 seconds
+
+If all retries fail:
+- Notification status becomes `FAILED`
+- The final error is stored in `notification_attempts`.
+
+## Starting services (Docker)
+
 From repo root:
+
 ```bash
 docker-compose -f backend/docker-compose.yml up --build
 ```
 
-### 2) Run migrations
-In a second terminal:
+Run migrations:
+
 ```bash
 docker-compose -f backend/docker-compose.yml exec backend alembic upgrade head
 ```
 
-### 3) Open API docs
-- http://localhost:8000/docs
-- http://localhost:8000/openapi.json
+## Worker
 
-## Environment variables
-- `DATABASE_URL`
-- `JWT_SECRET_KEY`
-- `JWT_ACCESS_TOKEN_EXPIRE_MINUTES`
+The Celery worker is started via docker-compose.
 
-See `.env.example`.
-
-## API overview
-Base path: `/api/v1`
-
-### Auth
-- `POST /auth/register`
-- `POST /auth/login`
-
-### Templates (authenticated)
-- `POST /templates`
-- `GET /templates`
-- `GET /templates/{id}`
-- `PUT /templates/{id}`
-- `DELETE /templates/{id}`
-
-### Notifications (authenticated)
-- `POST /notifications`
-- `GET /notifications`
-- `GET /notifications/{id}`
-
-## Architecture overview
-- `app/api`: routers
-- `app/core`: config, security, exception handling, response envelope
-- `app/db`: async engine/session
-- `app/models`: SQLAlchemy models
-- `app/schemas`: Pydantic v2 schemas
-- `app/repositories`: DB persistence layer
-- `app/services`: business logic (rendering templates)
-- `app/dependencies`: FastAPI dependencies (auth)
+Logs will include:
+- Notification Queued
+- Notification Processing Started
+- Retry Attempt
+- Notification Sent
+- Notification Failed
 
