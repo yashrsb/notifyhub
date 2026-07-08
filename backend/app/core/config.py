@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     email_simulation_enabled: bool = True
     email_failure_rate: float = 0.3
 
+    # Idempotency
+    idempotency_cache_ttl_seconds: int = 24 * 60 * 60
+    idempotency_lock_ttl_seconds: int = 30
+
 
 settings = Settings()
+
 

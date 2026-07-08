@@ -8,8 +8,8 @@ from celery import Task
 from app.workers.celery_app import celery_app
 from app.services.notification_worker_service import process_notification
 
-
 logger = logging.getLogger(__name__)
+
 
 
 @celery_app.task(bind=True, name="notifications.process", max_retries=3)

@@ -10,6 +10,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, TimestampMixin
 
 
+class NotificationChannel(StrEnum):
+    EMAIL = "EMAIL"
+    SMS = "SMS"
+    PUSH = "PUSH"
+
+
 class NotificationStatus(StrEnum):
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
@@ -17,11 +23,13 @@ class NotificationStatus(StrEnum):
     FAILED = "FAILED"
 
 
+
 class Notification(Base, TimestampMixin):
     __tablename__ = "notifications"
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    channel: Mapped[str] = mapped_column(String(length=64), nullable=False)
+    channel: Mapped[NotificationChannel] = mapped_column(String(length=64), nullable=False)
+
     recipient: Mapped[str] = mapped_column(Text(), nullable=False)
 
     template_id: Mapped[uuid.UUID] = mapped_column(

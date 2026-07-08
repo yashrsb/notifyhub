@@ -18,6 +18,8 @@ from app.schemas.notifications import (
 from app.services.notification_service import create_notification
 from app.services.notification_worker_service import get_notification_with_attempts
 from app.tasks.notifications_tasks import process_notification_task
+from app.services.idempotency_service import IdempotencyService
+
 
 
 router = APIRouter()
@@ -28,21 +30,29 @@ logger = logging.getLogger(__name__)
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def create(
     req: NotificationCreateRequest,
+    idempotency_key: str | None = None,
     session: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    notif = await create_notification(
+    if idempotency_key is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing Idempotency-Key header")
+
+    # Instantiate Redis client inside service layer.
+    from redis import Redis
+    redis_client = Redis.from_url(settings.redis_broker_url, decode_responses=False)
+    service = IdempotencyService(redis_client=redis_client)
+
+    result = await service.process_create(
+        idempotency_key=idempotency_key,
         session=session,
-        channel=req.channel,
+        channel=str(req.channel),
         recipient=req.recipient,
         template_id=req.template_id,
         variables=req.variables,
     )
 
-    logger.info("Notification Queued", extra={"notification_id": str(notif.id)})
-    process_notification_task.delay(str(notif.id))
+    return result.response_body
 
-    return NotificationQueuedResponse(notification_id=notif.id).model_dump()
 
 
 @router.get("")

@@ -9,8 +9,9 @@ from app.core.config import settings
 from app.core.exceptions import NotFoundError
 from app.db.session import get_engine
 from app.models.notification_attempts import NotificationAttemptStatus
-from app.models.notifications import NotificationStatus
-from app.providers.email_provider import EmailProvider
+from app.models.notifications import NotificationChannel, NotificationStatus
+from app.providers.factory import ProviderFactory
+
 from app.repositories.notification_attempts_repo import NotificationAttemptsRepository
 from app.repositories.notifications_repo import NotificationsRepository
 from app.repositories.templates_repo import TemplatesRepository
@@ -35,10 +36,10 @@ async def _process_notification_async(
     # Worker picked up
     await notif_repo.set_status(notification_id, NotificationStatus.PROCESSING.value)
 
-    provider = EmailProvider(
-        simulation_enabled=settings.email_simulation_enabled,
-        failure_rate=settings.email_failure_rate,
-    )
+    # Select provider via factory (worker is decoupled from implementations)
+    channel_enum = NotificationChannel(notif.channel)
+    provider = ProviderFactory.get_provider(channel_enum)
+
 
     # Every attempt must be persisted
     try:
@@ -55,11 +56,12 @@ async def _process_notification_async(
         rendered_subject = render_template_text(tpl.subject, {})
         rendered_body = render_template_text(tpl.body, {})
 
-        provider.send_email(
+        await provider.send(
             recipient=notif.recipient,
             subject=rendered_subject,
             body=rendered_body,
         )
+
 
         await attempt_repo.update_attempt_status(
             notification_id=notification_id,
