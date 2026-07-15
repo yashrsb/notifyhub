@@ -10,9 +10,15 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
 
+    # Phase 5 distributed rate limiting (middleware)
+    from app.middleware.rate_limit_middleware import RateLimitMiddleware
+
+    app.add_middleware(RateLimitMiddleware)
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
 
     return app
 

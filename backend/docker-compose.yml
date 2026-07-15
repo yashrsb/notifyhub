@@ -23,7 +23,7 @@ services:
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 60
 
       REDIS_BROKER_URL: redis://redis:6379/0
-      REDIS_RESULT_BACKEND_URL: redis://redis:6379/1
+      REDIS_RESULT_BACKEND_URL: redis://redis:6379/0
       CELERY_TASK_ALWAYS_EAGER: "false"
       CELERY_TASK_EAGER_PROPAGATES: "true"
 
@@ -43,7 +43,7 @@ services:
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 60
 
       REDIS_BROKER_URL: redis://redis:6379/0
-      REDIS_RESULT_BACKEND_URL: redis://redis:6379/1
+      REDIS_RESULT_BACKEND_URL: redis://redis:6379/0
       CELERY_TASK_ALWAYS_EAGER: "false"
       CELERY_TASK_EAGER_PROPAGATES: "true"
 
@@ -56,4 +56,3 @@ services:
 
 volumes:
   notifyhub_postgres_data:
-

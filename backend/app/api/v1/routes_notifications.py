@@ -1,49 +1,33 @@
 from __future__ import annotations
 
 import logging
-import uuid
 
 from fastapi import APIRouter, Depends, status
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
+import uuid
+
 from app.dependencies.auth import get_current_user
-from app.schemas.notifications import (
-    NotificationCreateRequest,
-    NotificationAttemptResponse,
-    NotificationQueuedResponse,
-    NotificationResponse,
-)
 
-from app.services.notification_service import create_notification
+from app.db.session import get_db
+from app.schemas.notifications import NotificationCreateRequest, NotificationResponse, NotificationAttemptResponse
 from app.services.notification_worker_service import get_notification_with_attempts
+from app.services.notification_service import create_notification
 from app.tasks.notifications_tasks import process_notification_task
-from app.services.idempotency_service import IdempotencyService
 
-
-
-router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def create(
     req: NotificationCreateRequest,
-    idempotency_key: str | None = None,
     session: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    if idempotency_key is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing Idempotency-Key header")
-
-    # Instantiate Redis client inside service layer.
-    from redis import Redis
-    redis_client = Redis.from_url(settings.redis_broker_url, decode_responses=False)
-    service = IdempotencyService(redis_client=redis_client)
-
-    result = await service.process_create(
-        idempotency_key=idempotency_key,
+    notif = await create_notification(
         session=session,
         channel=str(req.channel),
         recipient=req.recipient,
@@ -51,7 +35,15 @@ async def create(
         variables=req.variables,
     )
 
-    return result.response_body
+    # Enqueue async processing (API must not process directly).
+    process_notification_task.delay(str(notif.id), 1)
+
+    return {
+        "success": True,
+        "message": "Notification queued",
+        "notification_id": notif.id,
+    }
+
 
 
 
@@ -82,6 +74,7 @@ async def list_(session: AsyncSession = Depends(get_db), current_user=Depends(ge
 async def get(
     notification_id: uuid.UUID,
     session: AsyncSession = Depends(get_db),
+
     current_user=Depends(get_current_user),
 ):
     notif = await get_notification_with_attempts(session=session, notification_id=notification_id)
