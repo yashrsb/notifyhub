@@ -31,6 +31,7 @@ class NotificationAttemptsRepository:
         await self.session.refresh(attempt)
         return attempt
 
+
     async def list_by_notification_id(self, notification_id: uuid.UUID) -> list[NotificationAttempt]:
         res = await self.session.execute(
             select(NotificationAttempt).where(NotificationAttempt.notification_id == notification_id).order_by(

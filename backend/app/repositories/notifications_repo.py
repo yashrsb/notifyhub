@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from __future__ import annotations
 
 import uuid
 
@@ -44,15 +43,13 @@ class NotificationsRepository:
 
     async def set_status(self, notification_id: uuid.UUID, status: str) -> None:
         notif = await self.session.get(Notification, notification_id)
+
         if notif is None:
             return
         notif.status = status
         await self.session.commit()
 
-    async def set_last_error(self, notification_id: uuid.UUID, error_message: str) -> None:
-        # No error_message column on notifications in current schema.
-        # Final error is stored on notification_attempts.
-        return
+
 
 
 

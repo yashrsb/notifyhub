@@ -12,6 +12,7 @@ from app.models.notification_attempts import NotificationAttemptStatus
 from app.models.notifications import NotificationChannel, NotificationStatus
 from app.providers.factory import ProviderFactory
 
+
 from app.repositories.notification_attempts_repo import NotificationAttemptsRepository
 from app.repositories.notifications_repo import NotificationsRepository
 from app.repositories.templates_repo import TemplatesRepository
@@ -79,9 +80,8 @@ async def _process_notification_async(
             error_message=str(e),
         )
         # Notification error is considered dead-letter “final error”; we store it in attempts.
-        # Keep set_last_error as a no-op (schema compatible).
-        await notif_repo.set_last_error(notification_id, str(e))
         raise
+
 
 
 def process_notification(*, notification_id: uuid.UUID, attempt_number: int) -> None:
@@ -116,28 +116,11 @@ async def get_notification_with_attempts(
         if not notif:
             raise NotFoundError(message="Notification not found")
 
-        attempts = await attempt_repo.list_by_notification_id(notification_id)
-        notif.attempts = [
-            {
-                "attempt": a.attempt_number,
-                "status": "FAILED" if a.status == NotificationAttemptStatus.FAILED.value else "SUCCESS",
-                "error": a.error_message,
-            }
-            for a in attempts
-        ]
         return notif
 
-    notifs = await notif_repo.list()
-    # Attach attempts for each notification (best effort)
-    for n in notifs:
-        attempts = await attempt_repo.list_by_notification_id(n.id)
-        n.attempts = [
-            {
-                "attempt": a.attempt_number,
-                "status": "FAILED" if a.status == NotificationAttemptStatus.FAILED.value else "SUCCESS",
-                "error": a.error_message,
-            }
-            for a in attempts
-        ]
-    return notifs
+
+
+    return await notif_repo.list()
+
+
 

@@ -5,7 +5,8 @@ from enum import StrEnum
 
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 
 from app.db.base import Base, TimestampMixin
 
@@ -29,4 +30,10 @@ class NotificationAttempt(Base, TimestampMixin):
     attempt_number: Mapped[int] = mapped_column(nullable=False)
     status: Mapped[NotificationAttemptStatus] = mapped_column(String(length=32), nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text(), nullable=True)
+
+    notification: Mapped["Notification"] = relationship(
+        "Notification",
+        back_populates="attempts",
+    )
+
 

@@ -5,7 +5,8 @@ from enum import StrEnum
 
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 
 from app.db.base import Base, TimestampMixin
 
@@ -47,4 +48,13 @@ class Notification(Base, TimestampMixin):
         default=NotificationStatus.PENDING,
         server_default="PENDING",
     )
+
+    attempts: Mapped[list["NotificationAttempt"]] = relationship(
+        "NotificationAttempt",
+        back_populates="notification",
+        cascade="all, delete-orphan",
+        order_by="NotificationAttempt.attempt_number",
+        lazy="selectin",
+    )
+
 

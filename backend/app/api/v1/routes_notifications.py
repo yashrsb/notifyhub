@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, status
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import uuid
+
 
 from app.dependencies.auth import get_current_user
 
@@ -61,9 +61,10 @@ async def list_(session: AsyncSession = Depends(get_db), current_user=Depends(ge
             status=n.status,
             created_at=str(n.created_at),
             attempts=[
-                NotificationAttemptResponse(attempt=a["attempt"], status=a["status"], error=a.get("error"))
+                NotificationAttemptResponse(attempt=a.attempt_number, status=a.status.value, error=a.error_message)
                 for a in (n.attempts or [])
             ],
+
         ).model_dump()
         for n in notifs
     ]
@@ -89,11 +90,13 @@ async def get(
             rendered_subject=notif.rendered_subject,
             rendered_body=notif.rendered_body,
             status=notif.status,
+
             created_at=str(notif.created_at),
             attempts=[
-                NotificationAttemptResponse(attempt=a["attempt"], status=a["status"], error=a.get("error"))
+                NotificationAttemptResponse(attempt=a.attempt_number, status=a.status.value, error=a.error_message)
                 for a in (notif.attempts or [])
             ],
+
         ).model_dump(),
     }
 
