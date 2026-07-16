@@ -13,7 +13,7 @@ class AuditLogItem(BaseModel):
     entity_type: AuditEntityType
     entity_id: str | None
     action: AuditAction
-    performed_by: str | None
+    performed_by: uuid.UUID | None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str
 

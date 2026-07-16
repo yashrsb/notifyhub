@@ -36,6 +36,7 @@ class AuditService:
                 metadata=meta,
             )
             await self._repo.insert(log=log)
+
         except Exception:
             # Audit logging should never break business operations.
             logger.exception(

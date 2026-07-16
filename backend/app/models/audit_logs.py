@@ -7,6 +7,7 @@ from sqlalchemy import String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+
 from app.db.base import Base, TimestampMixin
 
 
@@ -50,7 +51,8 @@ class AuditLog(Base, TimestampMixin):
 
     action: Mapped[AuditAction] = mapped_column(String(length=128), nullable=False, index=True)
 
-    performed_by: Mapped[str] = mapped_column(String(length=64), nullable=True, index=True)
+    performed_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
+
 
     metadata: Mapped[dict] = mapped_column(JSONB(), nullable=False, default=dict)
 

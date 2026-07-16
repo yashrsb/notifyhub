@@ -11,7 +11,7 @@ import uuid
 from app.dependencies.auth import get_current_user
 
 from app.db.session import get_db
-from app.schemas.notifications import NotificationCreateRequest, NotificationResponse, NotificationAttemptResponse
+from app.schemas.notifications import NotificationCreateRequest, NotificationResponse, NotificationQueuedResponse, NotificationAttemptResponse
 from app.services.notification_worker_service import get_notification_with_attempts
 from app.services.notification_service import create_notification
 from app.tasks.notifications_tasks import process_notification_task
@@ -38,11 +38,7 @@ async def create(
     # Enqueue async processing (API must not process directly).
     process_notification_task.delay(str(notif.id), 1)
 
-    return {
-        "success": True,
-        "message": "Notification queued",
-        "notification_id": notif.id,
-    }
+    return NotificationQueuedResponse(notification_id=notif.id).model_dump()
 
 
 
@@ -62,7 +58,7 @@ async def list_(session: AsyncSession = Depends(get_db), current_user=Depends(ge
             created_at=str(n.created_at),
             attempts=[
                 NotificationAttemptResponse(attempt=a.attempt_number, status=a.status.value, error=a.error_message)
-                for a in (n.attempts or [])
+                for a in n.attempts
             ],
 
         ).model_dump()
@@ -94,7 +90,7 @@ async def get(
             created_at=str(notif.created_at),
             attempts=[
                 NotificationAttemptResponse(attempt=a.attempt_number, status=a.status.value, error=a.error_message)
-                for a in (notif.attempts or [])
+                for a in notif.attempts
             ],
 
         ).model_dump(),

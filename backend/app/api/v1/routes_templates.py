@@ -5,11 +5,10 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.response import success_response
 from app.db.session import get_db
 from app.dependencies.auth import get_current_user
 from app.schemas.templates import TemplateCreateRequest, TemplateResponse, TemplateUpdateRequest
-from app.schemas.auth import UserPublic
+
 from app.services.templates_service import create_template, delete_template, get_template, list_templates, update_template
 
 router = APIRouter()
@@ -71,7 +70,15 @@ async def update(
     session: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    tpl = await update_template(session=session, template_id=template_id, name=req.name, subject=req.subject, body=req.body)
+    tpl = await update_template(
+        session=session,
+        template_id=template_id,
+        name=req.name,
+        subject=req.subject,
+        body=req.body,
+        updated_by=current_user.id,
+    )
+
     return {"success": True, "data": TemplateResponse(
         id=tpl.id,
         name=tpl.name,
@@ -83,6 +90,8 @@ async def update(
 
 @router.delete("/{template_id}")
 async def delete(template_id: uuid.UUID, session: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
-    await delete_template(session=session, template_id=template_id)
+    tpl = await get_template(session=session, template_id=template_id)
+    await delete_template(session=session, template_id=template_id, deleted_by=current_user.id)
+
     return {"success": True, "data": {}}
 
