@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     idempotency_cache_ttl_seconds: int = 24 * 60 * 60
     idempotency_lock_ttl_seconds: int = 30
 
+    # Health checks
+    healthcheck_enabled: bool = True
+    readiness_check_database: bool = True
+    readiness_check_redis: bool = True
+    readiness_check_celery: bool = False
+
+
 
 # Rate limiting configuration
 # NOTE: redis client is created lazily here but stored for middleware reuse.

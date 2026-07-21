@@ -60,22 +60,36 @@ async def test_template_audit_created_updated_deleted(client, monkeypatch):
     assert dele.status_code == 200
 
     # We expect TEMPLATE_CREATED, TEMPLATE_UPDATED, TEMPLATE_DELETED.
-    actions = [c["action"] for c in publish_spy_calls if c["action"] in set(AuditAction)]
+    actions = [c["action"] for c in publish_spy_calls]
     assert AuditAction.TEMPLATE_CREATED in actions
     assert AuditAction.TEMPLATE_UPDATED in actions
     assert AuditAction.TEMPLATE_DELETED in actions
 
+    from app.models.audit_logs import AuditEntityType
 
+    created_call = next(c for c in publish_spy_calls if c["action"] == AuditAction.TEMPLATE_CREATED)
+    assert created_call["entity_type"] == str(AuditEntityType.TEMPLATE)
+    assert created_call["entity_id"] == str(tpl_id)
+    assert created_call["metadata"]["template_id"] == str(tpl_id)
+    assert created_call["metadata"]["template_name"] == "n1"
+    assert created_call["metadata"]["channel"] == "email"
     assert created_call["metadata"]["created_by"] is not None
     assert created_call["performed_by"] is not None
 
     updated_call = next(c for c in publish_spy_calls if c["action"] == AuditAction.TEMPLATE_UPDATED)
+    assert updated_call["entity_type"] == str(AuditEntityType.TEMPLATE)
+    assert updated_call["entity_id"] == str(tpl_id)
     assert updated_call["metadata"]["template_id"] == str(tpl_id)
-    assert "updated_fields" in updated_call["metadata"]
+    assert updated_call["metadata"]["template_name"] == "n2"
+    assert updated_call["metadata"]["channel"] == "email"
+    assert updated_call["metadata"]["updated_fields"] == ["name", "subject", "body"]
 
     deleted_call = next(c for c in publish_spy_calls if c["action"] == AuditAction.TEMPLATE_DELETED)
+    assert deleted_call["entity_type"] == str(AuditEntityType.TEMPLATE)
+    assert deleted_call["entity_id"] == str(tpl_id)
     assert deleted_call["metadata"]["template_id"] == str(tpl_id)
     assert deleted_call["metadata"]["channel"] == "email"
+    assert deleted_call["performed_by"] is not None
 
 
 @pytest.mark.anyio
