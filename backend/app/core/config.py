@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     readiness_check_redis: bool = True
     readiness_check_celery: bool = False
 
+    # Metrics
+    metrics_enabled: bool = True
+    prometheus_enabled: bool = True
 
 
 # Rate limiting configuration
@@ -82,6 +85,3 @@ try:
     settings._rate_limit_redis = AsyncRedis.from_url(settings.redis_broker_url, decode_responses=False)
 except Exception:
     settings._rate_limit_redis = None
-
-
-

@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
 from celery import Task
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.workers.celery_app import celery_app
+from app.db.session import get_engine
+from app.models.notification_attempts import NotificationAttemptStatus
+from app.repositories.notification_attempts_repo import NotificationAttemptsRepository
+from app.repositories.notifications_repo import NotificationsRepository
+from app.services.metrics_service import metrics
 from app.services.notification_worker_service import process_notification
+from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
-
 
 
 @celery_app.task(bind=True, name="notifications.process", max_retries=3)
@@ -34,14 +40,7 @@ def process_notification_task(self: Task, notification_id: str, attempt: int = 1
 
         if attempt >= 3:
             # Dead-letter handling (DB final state)
-            from app.db.session import get_engine
-            from app.models.notification_attempts import NotificationAttemptStatus
-            from app.repositories.notification_attempts_repo import NotificationAttemptsRepository
-            from app.repositories.notifications_repo import NotificationsRepository
-
             engine = get_engine()
-            import asyncio
-            from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
             async def runner() -> None:
                 sessionmaker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
@@ -59,14 +58,14 @@ def process_notification_task(self: Task, notification_id: str, attempt: int = 1
 
             asyncio.run(runner())
 
+            metrics.record_notification_failed(channel="EMAIL", provider="email_provider")
+
             logger.info(
                 "Notification Failed",
                 extra={"notification_id": str(nid), "attempt": attempt, "error": str(e)},
             )
             raise
 
+        metrics.record_retry(channel="EMAIL")
         countdown = 0 if attempt == 1 else (30 if attempt == 2 else 60)
         raise self.retry(exc=e, countdown=countdown)
-
-
-

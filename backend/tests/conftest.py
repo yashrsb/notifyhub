@@ -78,4 +78,3 @@ def client_app(app: FastAPI, _session_override):
 async def client(client_app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(app=client_app, base_url="http://test") as ac:
         yield ac
-

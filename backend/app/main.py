@@ -15,8 +15,14 @@ def create_app() -> FastAPI:
 
     app.add_middleware(RateLimitMiddleware)
 
+    # Phase 7B Prometheus metrics (middleware must be last-added so it wraps all other middleware)
+    from app.middleware.metrics_middleware import MetricsHTTPMiddleware
+
+    app.add_middleware(MetricsHTTPMiddleware)
+
     from app.db.session import get_engine
     from app.services.health_service import DependencyCheckResult, HealthService
+    from app.services.metrics_service import metrics
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     @app.get("/health")
@@ -62,6 +68,14 @@ def create_app() -> FastAPI:
     @app.get("/live")
     async def live() -> dict[str, str]:
         return {"status": "alive"}
+
+    @app.get("/metrics")
+    async def metrics_endpoint():
+        from fastapi import Response
+        from fastapi.responses import PlainTextResponse
+
+        payload = metrics.generate_latest()
+        return PlainTextResponse(content=payload.decode("utf-8"), media_type="text/plain; charset=utf-8")
 
     return app
 

@@ -3,12 +3,12 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from app.core.exceptions import NotFoundError
 from app.models.notifications import Notification
 from app.models.templates import NotificationTemplate
 from app.repositories.notifications_repo import NotificationsRepository
+from app.services.metrics_service import metrics
 from app.utils.template_renderer import render_template_text
 
 
@@ -28,13 +28,17 @@ async def create_notification(
     rendered_body = render_template_text(tpl.body, variables)
 
     repo = NotificationsRepository(session)
-    return await repo.create(
+    notif = await repo.create(
         channel=channel,
         recipient=recipient,
         template_id=template_id,
         rendered_subject=rendered_subject,
         rendered_body=rendered_body,
     )
+
+    metrics.record_notification_created(channel=channel)
+
+    return notif
 
 
 async def list_notifications(*, session: AsyncSession):
@@ -48,4 +52,3 @@ async def get_notification(*, session: AsyncSession, notification_id: uuid.UUID)
     if not notif:
         raise NotFoundError(message="Notification not found")
     return notif
-

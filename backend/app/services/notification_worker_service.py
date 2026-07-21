@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,9 +17,16 @@ from app.providers.factory import ProviderFactory
 from app.repositories.notification_attempts_repo import NotificationAttemptsRepository
 from app.repositories.notifications_repo import NotificationsRepository
 from app.repositories.templates_repo import TemplatesRepository
+from app.services.metrics_service import metrics
 from app.utils.template_renderer import render_template_text
 
 logger = logging.getLogger(__name__)
+
+PROVIDER_NAME_MAP: dict[str, str] = {
+    "EMAIL": "email_provider",
+    "SMS": "sms_provider",
+    "PUSH": "push_provider",
+}
 
 
 async def _process_notification_async(
@@ -41,8 +49,11 @@ async def _process_notification_async(
     channel_enum = NotificationChannel(notif.channel)
     provider = ProviderFactory.get_provider(channel_enum)
 
+    provider_name = PROVIDER_NAME_MAP.get(notif.channel, "unknown")
 
     # Every attempt must be persisted
+    start_time = time.monotonic()
+
     try:
         await attempt_repo.create_attempt(
             notification_id=notification_id,
@@ -63,6 +74,7 @@ async def _process_notification_async(
             body=rendered_body,
         )
 
+        duration = time.monotonic() - start_time
 
         await attempt_repo.update_attempt_status(
             notification_id=notification_id,
@@ -72,16 +84,23 @@ async def _process_notification_async(
         )
         await notif_repo.set_status(notification_id, NotificationStatus.SENT.value)
 
+        metrics.record_notification_sent(channel=notif.channel, provider=provider_name, duration=duration)
+
     except Exception as e:
+        duration = time.monotonic() - start_time
+
         await attempt_repo.update_attempt_status(
             notification_id=notification_id,
             attempt_number=attempt_number,
             status=NotificationAttemptStatus.FAILED.value,
             error_message=str(e),
         )
-        # Notification error is considered dead-letter “final error”; we store it in attempts.
-        raise
 
+        metrics.record_processing_duration(
+            channel=notif.channel, provider=provider_name, status="failed", duration=duration
+        )
+        # Notification error is considered dead-letter "final error"; we store it in attempts.
+        raise
 
 
 def process_notification(*, notification_id: uuid.UUID, attempt_number: int) -> None:
@@ -118,9 +137,4 @@ async def get_notification_with_attempts(
 
         return notif
 
-
-
     return await notif_repo.list()
-
-
-
