@@ -5,8 +5,11 @@ import logging
 import uuid
 
 from celery import Task
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.config import settings
 from app.db.session import get_engine
 from app.models.notification_attempts import NotificationAttemptStatus
 from app.repositories.notification_attempts_repo import NotificationAttemptsRepository
@@ -17,11 +20,14 @@ from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
+tracer = trace.get_tracer("notifyhub.tasks")
+
 
 @celery_app.task(bind=True, name="notifications.process", max_retries=3)
 def process_notification_task(self: Task, notification_id: str, attempt: int = 1) -> None:
     """Celery task entrypoint. Business logic stays in services."""
     nid = uuid.UUID(notification_id)
+
     logger.info(
         "Notification Processing Started",
         extra={"notification_id": str(nid), "attempt": attempt},
@@ -40,6 +46,15 @@ def process_notification_task(self: Task, notification_id: str, attempt: int = 1
 
         if attempt >= 3:
             # Dead-letter handling (DB final state)
+            if settings.otel_enabled:
+                with tracer.start_as_current_span("Worker.DeadLetter") as dl_span:
+                    dl_span.set_attribute("notification.id", str(nid))
+                    dl_span.set_attribute("retry.count", attempt)
+                    dl_span.set_attribute("error.message", str(e))
+                    dl_span.record_exception(e)
+                    dl_span.set_status(Status(StatusCode.ERROR, str(e)))
+                    dl_span.set_attribute("notification.dead_letter", True)
+
             engine = get_engine()
 
             async def runner() -> None:
@@ -67,5 +82,14 @@ def process_notification_task(self: Task, notification_id: str, attempt: int = 1
             raise
 
         metrics.record_retry(channel="EMAIL")
+
+        if settings.otel_enabled:
+            with tracer.start_as_current_span("Notification.Retry") as retry_span:
+                retry_span.set_attribute("notification.id", str(nid))
+                retry_span.set_attribute("retry.count", attempt)
+                retry_span.set_attribute("error.message", str(e))
+                retry_span.record_exception(e)
+                retry_span.set_status(Status(StatusCode.ERROR, str(e)))
+
         countdown = 0 if attempt == 1 else (30 if attempt == 2 else 60)
         raise self.retry(exc=e, countdown=countdown)

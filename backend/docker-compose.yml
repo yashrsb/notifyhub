@@ -29,6 +29,11 @@ services:
 
       EMAIL_SIMULATION_ENABLED: "true"
       EMAIL_FAILURE_RATE: "0.3"
+
+      # OpenTelemetry distributed tracing
+      OTEL_ENABLED: "true"
+      OTEL_SERVICE_NAME: notifyhub-backend
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
     ports:
       - "8000:8000"
     depends_on:
@@ -49,6 +54,11 @@ services:
 
       EMAIL_SIMULATION_ENABLED: "true"
       EMAIL_FAILURE_RATE: "0.3"
+
+      # OpenTelemetry distributed tracing
+      OTEL_ENABLED: "true"
+      OTEL_SERVICE_NAME: notifyhub-worker
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
     depends_on:
       - postgres
       - redis

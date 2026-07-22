@@ -20,6 +20,11 @@ def create_app() -> FastAPI:
 
     app.add_middleware(MetricsHTTPMiddleware)
 
+    # Phase 7C OpenTelemetry distributed tracing middleware
+    from app.middleware.tracing_middleware import TracingHTTPMiddleware
+
+    app.add_middleware(TracingHTTPMiddleware)
+
     from app.db.session import get_engine
     from app.services.health_service import DependencyCheckResult, HealthService
     from app.services.metrics_service import metrics

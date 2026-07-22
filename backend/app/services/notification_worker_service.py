@@ -4,6 +4,8 @@ import logging
 import time
 import uuid
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -21,6 +23,8 @@ from app.services.metrics_service import metrics
 from app.utils.template_renderer import render_template_text
 
 logger = logging.getLogger(__name__)
+
+tracer = trace.get_tracer("notifyhub.worker")
 
 PROVIDER_NAME_MAP: dict[str, str] = {
     "EMAIL": "email_provider",
@@ -45,62 +49,133 @@ async def _process_notification_async(
     # Worker picked up
     await notif_repo.set_status(notification_id, NotificationStatus.PROCESSING.value)
 
-    # Select provider via factory (worker is decoupled from implementations)
-    channel_enum = NotificationChannel(notif.channel)
-    provider = ProviderFactory.get_provider(channel_enum)
+    # Create a named span for notification processing at the business boundary.
+    if settings.otel_enabled:
+        with tracer.start_as_current_span("Notification.Process") as proc_span:
+            proc_span.set_attribute("notification.id", str(notification_id))
+            proc_span.set_attribute("notification.template_id", str(notif.template_id))
+            proc_span.set_attribute("notification.channel", notif.channel)
+            proc_span.set_attribute("notification.status", "PROCESSING")
+            proc_span.set_attribute("retry.count", attempt_number)
 
-    provider_name = PROVIDER_NAME_MAP.get(notif.channel, "unknown")
+            # Select provider via factory
+            channel_enum = NotificationChannel(notif.channel)
+            provider = ProviderFactory.get_provider(channel_enum)
 
-    # Every attempt must be persisted
-    start_time = time.monotonic()
+            provider_name = PROVIDER_NAME_MAP.get(notif.channel, "unknown")
 
-    try:
-        await attempt_repo.create_attempt(
-            notification_id=notification_id,
-            attempt_number=attempt_number,
-            status=NotificationAttemptStatus.PENDING.value,
-            error_message=None,
-        )
+            start_time = time.monotonic()
 
-        tpl_repo = TemplatesRepository(session)
-        tpl = await tpl_repo.get(notif.template_id)
+            try:
+                await attempt_repo.create_attempt(
+                    notification_id=notification_id,
+                    attempt_number=attempt_number,
+                    status=NotificationAttemptStatus.PENDING.value,
+                    error_message=None,
+                )
 
-        rendered_subject = render_template_text(tpl.subject, {})
-        rendered_body = render_template_text(tpl.body, {})
+                tpl_repo = TemplatesRepository(session)
+                tpl = await tpl_repo.get(notif.template_id)
 
-        await provider.send(
-            recipient=notif.recipient,
-            subject=rendered_subject,
-            body=rendered_body,
-        )
+                rendered_subject = render_template_text(tpl.subject, {})
+                rendered_body = render_template_text(tpl.body, {})
 
-        duration = time.monotonic() - start_time
+                await provider.send(
+                    recipient=notif.recipient,
+                    subject=rendered_subject,
+                    body=rendered_body,
+                )
 
-        await attempt_repo.update_attempt_status(
-            notification_id=notification_id,
-            attempt_number=attempt_number,
-            status=NotificationAttemptStatus.SUCCESS.value,
-            error_message=None,
-        )
-        await notif_repo.set_status(notification_id, NotificationStatus.SENT.value)
+                duration = time.monotonic() - start_time
 
-        metrics.record_notification_sent(channel=notif.channel, provider=provider_name, duration=duration)
+                await attempt_repo.update_attempt_status(
+                    notification_id=notification_id,
+                    attempt_number=attempt_number,
+                    status=NotificationAttemptStatus.SUCCESS.value,
+                    error_message=None,
+                )
+                await notif_repo.set_status(notification_id, NotificationStatus.SENT.value)
 
-    except Exception as e:
-        duration = time.monotonic() - start_time
+                metrics.record_notification_sent(channel=notif.channel, provider=provider_name, duration=duration)
 
-        await attempt_repo.update_attempt_status(
-            notification_id=notification_id,
-            attempt_number=attempt_number,
-            status=NotificationAttemptStatus.FAILED.value,
-            error_message=str(e),
-        )
+                proc_span.set_attribute("notification.status", "SENT")
+                proc_span.set_attribute("notification.duration_ms", duration * 1000)
+                proc_span.set_attribute("provider.name", provider_name)
 
-        metrics.record_processing_duration(
-            channel=notif.channel, provider=provider_name, status="failed", duration=duration
-        )
-        # Notification error is considered dead-letter "final error"; we store it in attempts.
-        raise
+            except Exception as e:
+                duration = time.monotonic() - start_time
+
+                await attempt_repo.update_attempt_status(
+                    notification_id=notification_id,
+                    attempt_number=attempt_number,
+                    status=NotificationAttemptStatus.FAILED.value,
+                    error_message=str(e),
+                )
+
+                metrics.record_processing_duration(
+                    channel=notif.channel, provider=provider_name, status="failed", duration=duration
+                )
+
+                proc_span.set_attribute("notification.status", "FAILED")
+                proc_span.set_attribute("error.message", str(e))
+                proc_span.record_exception(e)
+                proc_span.set_status(Status(StatusCode.ERROR, str(e)))
+                raise
+    else:
+        # Tracing disabled — run the same logic without span wrapping.
+        channel_enum = NotificationChannel(notif.channel)
+        provider = ProviderFactory.get_provider(channel_enum)
+
+        provider_name = PROVIDER_NAME_MAP.get(notif.channel, "unknown")
+
+        start_time = time.monotonic()
+
+        try:
+            await attempt_repo.create_attempt(
+                notification_id=notification_id,
+                attempt_number=attempt_number,
+                status=NotificationAttemptStatus.PENDING.value,
+                error_message=None,
+            )
+
+            tpl_repo = TemplatesRepository(session)
+            tpl = await tpl_repo.get(notif.template_id)
+
+            rendered_subject = render_template_text(tpl.subject, {})
+            rendered_body = render_template_text(tpl.body, {})
+
+            await provider.send(
+                recipient=notif.recipient,
+                subject=rendered_subject,
+                body=rendered_body,
+            )
+
+            duration = time.monotonic() - start_time
+
+            await attempt_repo.update_attempt_status(
+                notification_id=notification_id,
+                attempt_number=attempt_number,
+                status=NotificationAttemptStatus.SUCCESS.value,
+                error_message=None,
+            )
+            await notif_repo.set_status(notification_id, NotificationStatus.SENT.value)
+
+            metrics.record_notification_sent(channel=notif.channel, provider=provider_name, duration=duration)
+
+        except Exception as e:
+            duration = time.monotonic() - start_time
+
+            await attempt_repo.update_attempt_status(
+                notification_id=notification_id,
+                attempt_number=attempt_number,
+                status=NotificationAttemptStatus.FAILED.value,
+                error_message=str(e),
+            )
+
+            metrics.record_processing_duration(
+                channel=notif.channel, provider=provider_name, status="failed", duration=duration
+            )
+            raise
 
 
 def process_notification(*, notification_id: uuid.UUID, attempt_number: int) -> None:

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
+from opentelemetry import trace
 from redis import Redis
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,8 @@ from app.services.notification_service import create_notification
 from app.tasks.notifications_tasks import process_notification_task
 
 logger = logging.getLogger(__name__)
+
+tracer = trace.get_tracer("notifyhub.idempotency")
 
 
 @dataclass(frozen=True)
@@ -65,7 +68,13 @@ class IdempotencyService:
 
         # 1) Redis cache fast path
         cache_key = self._redis_cache_key(key=idempotency_key)
-        cached = self._redis.get(cache_key)
+        if settings.otel_enabled:
+            with tracer.start_as_current_span("Redis.Idempotency") as span:
+                span.set_attribute("idempotency.key", idempotency_key)
+                span.set_attribute("redis.operation", "cache_get")
+                cached = self._redis.get(cache_key)
+        else:
+            cached = self._redis.get(cache_key)
         if cached is not None:
             logger.info("Idempotency cache hit", extra={"idempotency_key": idempotency_key})
             body = json.loads(cached)
@@ -78,7 +87,13 @@ class IdempotencyService:
         # 2) Distributed lock
         lock_key = self._redis_lock_key(key=idempotency_key)
         lock_token = str(time.time_ns())
-        lock_acquired = self._redis.set(lock_key, lock_token, nx=True, ex=30)
+        if settings.otel_enabled:
+            with tracer.start_as_current_span("Redis.Idempotency") as span:
+                span.set_attribute("idempotency.key", idempotency_key)
+                span.set_attribute("redis.operation", "lock_acquire")
+                lock_acquired = self._redis.set(lock_key, lock_token, nx=True, ex=30)
+        else:
+            lock_acquired = self._redis.set(lock_key, lock_token, nx=True, ex=30)
 
         if not lock_acquired:
             # Another request is creating/processing the same key.
@@ -162,7 +177,13 @@ class IdempotencyService:
                 "notification_id": str(notif.id),
                 "response_body": response_body,
             }
-            self._redis.set(cache_key, json.dumps(cache_payload, default=str), ex=int(ttl.total_seconds()))
+            if settings.otel_enabled:
+                with tracer.start_as_current_span("Redis.Idempotency") as span:
+                    span.set_attribute("idempotency.key", idempotency_key)
+                    span.set_attribute("redis.operation", "cache_set")
+                    self._redis.set(cache_key, json.dumps(cache_payload, default=str), ex=int(ttl.total_seconds()))
+            else:
+                self._redis.set(cache_key, json.dumps(cache_payload, default=str), ex=int(ttl.total_seconds()))
 
             return IdempotencyResult(
                 response_body=response_body,
@@ -173,8 +194,15 @@ class IdempotencyService:
         finally:
             # Release lock
             # Best effort release: only delete if our token matches.
-            current = self._redis.get(lock_key)
-            if current is not None and current.decode("utf-8") == lock_token:
-                self._redis.delete(lock_key)
-                logger.info("Lock released", extra={"idempotency_key": idempotency_key})
-
+            if settings.otel_enabled:
+                with tracer.start_as_current_span("Redis.Idempotency") as span:
+                    span.set_attribute("idempotency.key", idempotency_key)
+                    span.set_attribute("redis.operation", "lock_release")
+                    current = self._redis.get(lock_key)
+                    if current is not None and current.decode("utf-8") == lock_token:
+                        self._redis.delete(lock_key)
+            else:
+                current = self._redis.get(lock_key)
+                if current is not None and current.decode("utf-8") == lock_token:
+                    self._redis.delete(lock_key)
+            logger.info("Lock released", extra={"idempotency_key": idempotency_key})

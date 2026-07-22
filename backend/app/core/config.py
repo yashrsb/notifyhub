@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     prometheus_enabled: bool = True
 
+    # OpenTelemetry tracing
+    otel_enabled: bool = True
+    otel_service_name: str = "notifyhub-backend"
+    otel_exporter_otlp_endpoint: str = ""
+    otel_exporter_otlp_headers: str = ""
+    service_version: str = "1.0.0"
+    deployment_environment: str = "development"
+
 
 # Rate limiting configuration
 # NOTE: redis client is created lazily here but stored for middleware reuse.
