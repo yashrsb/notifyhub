@@ -9,11 +9,26 @@ services:
       - "5432:5432"
     volumes:
       - notifyhub_postgres_data:/var/lib/postgresql/data
+    networks:
+      - notifyhub_network
 
   redis:
     image: redis:7
     ports:
       - "6379:6379"
+    networks:
+      - notifyhub_network
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC receiver
+      - "4318:4318"     # OTLP HTTP receiver
+    networks:
+      - notifyhub_network
 
   backend:
     build: .
@@ -33,12 +48,15 @@ services:
       # OpenTelemetry distributed tracing
       OTEL_ENABLED: "true"
       OTEL_SERVICE_NAME: notifyhub-backend
-      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "8000:8000"
     depends_on:
       - postgres
       - redis
+      - jaeger
+    networks:
+      - notifyhub_network
 
   worker:
     build: .
@@ -58,11 +76,18 @@ services:
       # OpenTelemetry distributed tracing
       OTEL_ENABLED: "true"
       OTEL_SERVICE_NAME: notifyhub-worker
-      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     depends_on:
       - postgres
       - redis
+      - jaeger
     command: celery -A app.workers.celery_app worker --loglevel=INFO --concurrency=1
+    networks:
+      - notifyhub_network
+
+networks:
+  notifyhub_network:
+    driver: bridge
 
 volumes:
   notifyhub_postgres_data:

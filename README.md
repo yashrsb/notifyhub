@@ -66,6 +66,155 @@ Logs will include:
 - Notification Sent
 - Notification Failed
 
+## Observability (Phase 7D — Jaeger & Docker Integration)
+
+### Architecture
+
+Traces flow through the system as follows:
+
+```
+Client
+↓
+FastAPI
+↓
+Redis
+↓
+PostgreSQL
+↓
+Celery
+↓
+Worker
+↓
+Provider
+↓
+OpenTelemetry
+↓
+Jaeger
+```
+
+### Running the complete stack
+
+Start all services including Jaeger:
+
+```bash
+docker-compose -f backend/docker-compose.yml up --build
+```
+
+This starts:
+- **postgres**: Database
+- **redis**: Message broker for Celery
+- **jaeger**: Distributed tracing backend (all-in-one)
+- **backend**: FastAPI application
+- **worker**: Celery worker
+
+Run migrations:
+
+```bash
+docker-compose -f backend/docker-compose.yml exec backend alembic upgrade head
+```
+
+### Access URLs
+
+| Service | URL |
+|---------|-----|
+| Backend API | http://localhost:8000 |
+| Swagger UI | http://localhost:8000/docs |
+| Jaeger UI | http://localhost:16686 |
+| Metrics endpoint | http://localhost:8000/metrics |
+| Health endpoint | http://localhost:8000/health |
+| Ready endpoint | http://localhost:8000/ready |
+| Live endpoint | http://localhost:8000/live |
+
+### Viewing Traces
+
+Follow these steps to view a complete distributed trace in Jaeger:
+
+1. **Start Docker Compose**:
+   ```bash
+   docker-compose -f backend/docker-compose.yml up --build
+   ```
+
+2. **Open Jaeger UI**:
+   Navigate to [http://localhost:16686](http://localhost:16686) in your browser.
+
+3. **Create a test notification**:
+   ```bash
+   # Register a user
+   curl -X POST http://localhost:8000/api/v1/auth/register \
+     -H "Content-Type: application/json" \
+     -d '{"email":"test@example.com","password":"Password123!"}'
+
+   # Login to get a token
+   TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"email":"test@example.com","password":"Password123!"}' | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+
+   # Create a template
+   TPL_ID=$(curl -s -X POST http://localhost:8000/api/v1/templates \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer $TOKEN" \
+     -d '{"name":"welcome","subject":"Hello {{name}}","body":"Welcome, {{name}}!"}' | python -c "import sys,json;print(json.load(sys.stdin)['data']['id'])")
+
+   # Send a notification (triggers the full trace)
+   curl -X POST http://localhost:8000/api/v1/notifications \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer $TOKEN" \
+     -d "{\"channel\":\"email\",\"recipient\":\"user@example.com\",\"template_id\":\"$TPL_ID\",\"variables\":{\"name\":\"Alice\"}}"
+   ```
+
+4. **Find the trace in Jaeger**:
+   - In the Jaeger UI, select service: **notifyhub-backend**
+   - Click **Find Traces**
+   - You should see a trace with the operation `POST /api/v1/notifications`
+
+5. **Explore the trace**:
+   - Click on the trace to expand it
+   - The trace waterfall should show:
+     - `POST /api/v1/notifications` — FastAPI HTTP handler
+     - SQL spans — PostgreSQL queries (automatic)
+     - Celery produce span — Task enqueued to Redis
+     - Celery consume span — Worker picked up the task
+     - `Notification.Process` — Worker processing the notification
+     - `Provider.Resolve` — Provider selection
+     - If a retry occurs: `Notification.Retry`
+     - If all retries fail: `Worker.DeadLetter`
+     - Redis spans — Idempotency cache/lock operations
+
+### Troubleshooting
+
+#### No traces appearing in Jaeger
+
+- Verify Jaeger is running: `docker ps | grep jaeger`
+- Check the Jaeger UI loads at http://localhost:16686
+- Verify `OTEL_ENABLED` is set to `"true"` in docker-compose.yml
+- Check backend/worker logs for OTLP exporter errors: `docker-compose logs backend | grep OTLP`
+
+#### Incorrect OTLP endpoint
+
+- The correct endpoint is `http://jaeger:4318/v1/traces` (Docker internal hostname)
+- Do NOT use `localhost` from inside containers — use the service name `jaeger`
+- Verify the endpoint in `docker-compose.yml` under `backend` and `worker` environment variables
+
+#### Docker networking issues
+
+- All services are on the `notifyhub_network` bridge network
+- Services communicate via service names (e.g., `postgres`, `redis`, `jaeger`)
+- Run `docker network ls` and verify `notifyhub_notifyhub_network` exists
+- Run `docker network inspect notifyhub_notifyhub_network` to see connected containers
+
+#### Worker not exporting traces
+
+- Check worker logs: `docker-compose logs worker`
+- Look for "OTLP span exporter configured" log message
+- Verify `OTEL_EXPORTER_OTLP_ENDPOINT` is set correctly for the worker service
+- Verify `OTEL_ENABLED` is `"true"` for the worker
+
+#### Redis/PostgreSQL unavailable
+
+- Check service health: `docker-compose ps`
+- Verify database readiness via the health endpoint: `curl http://localhost:8000/ready`
+- Restart individual services if needed: `docker-compose restart postgres` or `docker-compose restart redis`
+
 ## Distributed Tracing (Phase 7C)
 
 ### Overview
@@ -173,7 +322,7 @@ Environment variables:
 |----------|---------|-------------|
 | `OTEL_ENABLED` | `true` | Set to `false` to disable tracing globally |
 | `OTEL_SERVICE_NAME` | `notifyhub-backend` | Service name reported in traces |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `""` | OTLP HTTP endpoint (e.g. `http://collector:4318/v1/traces`). Empty = console only |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `""` | OTLP HTTP endpoint (e.g. `http://jaeger:4318/v1/traces`). Empty = console only |
 | `SERVICE_VERSION` | `1.0.0` | Version reported in `service.version` resource attribute |
 | `DEPLOYMENT_ENVIRONMENT` | `development` | Environment reported in `deployment.environment` resource attribute |
 
@@ -187,7 +336,7 @@ Set `OTEL_ENABLED=false` to disable all tracing. When disabled:
 ### Exporters
 
 - **ConsoleSpanExporter**: Always enabled when `OTEL_ENABLED=true`. Spans are printed to stdout.
-- **OTLPSpanExporter**: Enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is non-empty. Supports any OTLP-compatible backend.
+- **OTLPSpanExporter**: Enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is non-empty. Supports any OTLP-compatible backend (e.g., Jaeger).
 
 ### Business-level instrumentation philosophy
 
